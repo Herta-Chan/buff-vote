@@ -10,3 +10,12 @@ npm i @faker-js/faker puppeteer-extra puppeteer-extra-plugin-stealth puppeteer p
 ```sh
 node .
 ```
+
+### Auto
+```sh
+chmod +x run.sh
+```
+
+```sh
+run.sh
+```
