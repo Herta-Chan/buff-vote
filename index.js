@@ -1,144 +1,198 @@
-const teamVote = [
-  {
-      id: 11,
-      tag: 'thpt_nam',
-  },
-  {
-      id: 54,
-      tag: 'thpt_nu',
-  },
-];
+const { allFakers } = require('@faker-js/faker');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin());
 
-function randomSDT() {
-  const prefixes = ['03', '05', '07', '08', '09', '06']; 
-  const randomPrefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+const faker = allFakers.vi;
 
-  let str = randomPrefix;
-
-  for (let i = 0; i < 8; i++) {
-    str += Math.floor(Math.random() * 10).toString();
-  }
-
-  return str;
+function createRandomUser() {
+	const n = `${faker.person.fullName()}`.split(' ');
+	return {
+		phone: faker.phone.number().replace(/ +/g, ''),
+		name: [n[2], n[0], n[1]].join(' '),
+		email: faker.internet.email(),
+	};
 }
 
-console.log(randomSDT());
+async function start() {
+	const browser = await puppeteer.launch({ headless: true, devtools: false });
+	async function task() {
+		const user = createRandomUser();
+		let voting = 0;
+		console.log('Running task...', user);
+		const page = await browser.newPage();
+		// K load ảnh để tải trang nhanh hơn
+		await page.setRequestInterception(true);
+		page.on('request', (request) => {
+			if (request.resourceType() === 'image') {
+				request.abort();
+			} else {
+				request.continue();
+			}
+		});
+		page.on('response', async (response) => {
+			if (response.url() == 'https://amitaplus.com/bongro/vote/store') {
+				voting++;
+				if (response.ok()) {
+					console.log('Request successful:', response.url());
+				} else {
+					console.error('Request failed:', response.url());
+				}
+				if (voting == 2) {
+					await page.deleteCookie();
+					await page.evaluate(() => {
+						window.localStorage.clear();
+						window.sessionStorage.clear();
+					});
 
-function randomGmail() {
-  const hoList = ["Nguyen", "Tran", "Le", "Pham", "Hoang", "Huynh", "Phan", "Vu", "Vo", "Dang"];
-  const tenList = ["Nam", "Ha", "Lan", "An", "Linh", "Dung", "Huong", "Anh", "Tung", "Bao"];
-  const minYear = 1970; // Năm sinh tối thiểu
-  const maxYear = 2005; // Năm sinh tối đa
+					// Đóng tab
+					await page.close();
 
-  const randomHo = hoList[Math.floor(Math.random() * hoList.length)];
-  const randomTen = tenList[Math.floor(Math.random() * tenList.length)];
-  const randomYear = Math.floor(Math.random() * (maxYear - minYear + 1)) + minYear;
+					// Spawn task mới
+					task();
+				}
+			}
+		});
+		await page.goto('https://amitaplus.com/bongro/vote');
+		await page.waitForSelector('#audienceName');
+		await page.waitForSelector('#votingPage > script:nth-child(6)');
 
-  const email = `${randomHo.toLowerCase()}${randomTen.toLowerCase()}${randomYear}@gmail.com`;
-  return email;
+		const scriptContent = await page.evaluate(() => {
+			const element = document.querySelector(
+				'#votingPage > script:nth-child(6)',
+			);
+			return element ? element.textContent : null;
+		});
+
+		if (scriptContent) {
+			console.log('Script content đã tìm thấy');
+		} else {
+			console.log('Element not found or script has no text content.');
+		}
+
+		function getCsrfToken(functionName) {
+			const line = scriptContent.trim().split('\n');
+			let found = false;
+			for (let i = 0; i < line.length - 1; i++) {
+				if (found && line[i].includes('csrf_test_name:')) {
+					const csrf = line[i]
+						.replace('csrf_test_name:', '')
+						.trim()
+						.replace(/"/g, '');
+					console.log(`${functionName}: ${csrf}`);
+					return csrf;
+				}
+				if (line[i].includes(`function ${functionName}`)) {
+					found = true;
+				}
+			}
+		}
+
+		await page.evaluate(`
+			validateVote = function (audience, teamId, tag) {
+			$.ajax({
+				url: 'https://amitaplus.com/bongro/vote/validateVote',
+				type: 'POST',
+				data: {
+					phone: audience.phone,
+					email: audience.email,
+					tag: tag,
+					csrf_test_name:
+						'${getCsrfToken('validateVote')}',
+				},
+				dataType: 'json',
+				success: function (result) {
+					if (typeof result.audienceId !== 'undefined') {
+						if (result.audienceId == 0) {
+							infoModal();
+						} else {
+							if (result.voted == 1) {
+								var alert = {
+									title: 'Thông báo',
+									icon: 'warning',
+									text: 'Đã hết lượt bình chọn ngày hôm nay. Hãy thử lại vào ngày mai!',
+								};
+								showAlert(alert);
+							} else {
+								submitVote(result.audienceId, teamId, tag);
+							}
+						}
+					}
+				},
+			});
+		};
+
+		checkInfo = function (teamId, tag) {
+			var audience = JSON.parse(
+				localStorage.getItem('amitaplusAudience'),
+			);
+			if (audience === null) {
+				infoModal();
+			} else {
+				validateVote(audience, teamId, tag);
+			}
+		};
+
+		submitVote = function (audienceId, teamId, tag) {
+			$.ajax({
+				url: 'https://amitaplus.com/bongro/vote/store',
+				type: 'POST',
+				data: {
+					teamId,
+					audienceId: audienceId,
+					tag,
+					csrf_test_name:
+						'${getCsrfToken('submitVote')}',
+				},
+				dataType: 'json',
+				success: function (result) {
+					if (typeof result.alert !== 'undefined') {
+						showAlert(result.alert);
+					}
+				},
+			});
+		};
+
+		vote = function (teamId, tag) {
+			console.log('Running patch function');
+			checkInfo(teamId, tag);
+		};
+
+		console.clear();
+		console.log('Patch function');
+	`);
+
+		// Click (kiểu này vì nó bị ẩn)
+		await page.evaluate(() => {
+			document.getElementById('audienceName').click();
+		});
+		// Chờ modal xuất hiện
+		await page.waitForSelector('#createModal');
+
+		// Lấy các phần tử input
+		const nameInput = await page.waitForSelector('#inputName');
+		const emailInput = await page.waitForSelector('#inputEmail');
+		const phoneInput = await page.waitForSelector('#inputPhone');
+
+		// Điền dữ liệu vào các input
+		await nameInput.type(user.name);
+		await emailInput.type(user.email);
+		await phoneInput.type(user.phone);
+
+		// Click Lưu
+		await page.evaluate(() => {
+			window.feStore();
+		});
+
+		// Đợi khoảng 0,5s
+		await new Promise((r) => setTimeout(r, 500));
+
+		await page.evaluate(() => {
+			window.vote(11, 'thpt_nam');
+			window.vote(54, 'thpt_nu');
+		});
+	}
+	task();
 }
 
-console.log(randomGmail());
-
-function randomHoVaTen() {
-  const hoList = ["Nguyễn", "Trần", "Lê", "Phạm", "Hoàng", "Huỳnh", "Phan", "Vũ", "Võ", "Đặng"];
-  const tenDemList = ["Văn", "Thị", "Hồng", "Hoàng", "Như", "Minh", "Thành", "Đức", "Thu", "Tuấn"];
-  const tenList = ["Nam", "Hà", "Lan", "An", "Linh", "Dũng", "Hương", "Anh", "Tùng", "Bảo"];
-
-  const randomHo = hoList[Math.floor(Math.random() * hoList.length)];
-  const randomTenDem = tenDemList[Math.floor(Math.random() * tenDemList.length)];
-  const randomTen = tenList[Math.floor(Math.random() * tenList.length)];
-
-  return `${randomHo} ${randomTenDem} ${randomTen}`;
-}
-
-console.log(randomHoVaTen());
-
-function task(loopTask = false) {
-  const data = new URLSearchParams();
-  data.set('name', randomHoVaTen());
-  data.set('email', randomGmail());
-  data.set('phone', randomSDT());
-  return fetch('https://amitaplus.com/bongro/audience/store', {
-      headers: {
-          accept: 'application/json, text/javascript, */*; q=0.01',
-          'accept-language': 'vi-VN,vi;q=0.9',
-          'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'sec-ch-ua':
-              '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-          'sec-ch-ua-mobile': '?0',
-          'sec-ch-ua-platform': '"Windows"',
-          'sec-fetch-dest': 'empty',
-          'sec-fetch-mode': 'cors',
-          'sec-fetch-site': 'same-origin',
-          'x-requested-with': 'XMLHttpRequest',
-          'user-agent': `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36`,
-      },
-      referrer: 'https://amitaplus.com/bongro/vote',
-      referrerPolicy: 'strict-origin-when-cross-origin',
-      body: data.toString(),
-      method: 'POST',
-      mode: 'cors',
-      credentials: 'omit',
-  })
-      .then((r) => {
-          console.log('Response status:', r.status);
-          return r.json();
-      })
-      .then((res) => {
-          console.log('Response JSON:', res);
-          return Promise.all(
-              teamVote.map((d) => voteTeam(d.id, res.audienceId, d.tag)),
-          );
-      })
-      .then(() => {
-          if (loopTask) {
-              return task(loopTask);
-          }
-      })
-      .catch((error) => {
-          console.error('Error:', error);
-      });
-}
-
-/**
-* @param {thpt_nam|thpt_nu} tag
-*/
-function voteTeam(teamId, userId, tag) {
-  const data = new URLSearchParams();
-  data.set('teamId', teamId);
-  data.set('audienceId', userId);
-  data.set('tag', tag);
-  return fetch('https://amitaplus.com/bongro/vote/store', {
-      headers: {
-          accept: 'application/json, text/javascript, */*; q=0.01',
-          'accept-language': 'vi-VN,vi;q=0.9',
-          'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'sec-ch-ua':
-              '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-          'sec-ch-ua-mobile': '?0',
-          'sec-ch-ua-platform': '"Windows"',
-          'sec-fetch-dest': 'empty',
-          'sec-fetch-mode': 'cors',
-          'sec-fetch-site': 'same-origin',
-          'x-requested-with': 'XMLHttpRequest',
-          'user-agent': `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36`,
-      },
-      referrer: 'https://amitaplus.com/bongro/vote',
-      referrerPolicy: 'strict-origin-when-cross-origin',
-      body: data.toString(),
-      method: 'POST',
-      mode: 'cors',
-      credentials: 'omit',
-  })
-      .then((r) => r.json())
-      .then((data) => {
-          console.log(
-              `UID: ${userId} vote cho ${teamId} (${tag}) status: ${
-                  data?.alert?.icon == 'success' ? '✅' : '❌'
-              }`,
-          );
-      });
-}
-
-task(true);
+start();
