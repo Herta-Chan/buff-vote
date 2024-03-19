@@ -7,12 +7,20 @@ const faker = allFakers.vi;
 
 function createRandomUser() {
 	const n = `${faker.person.fullName()}`.split(' ');
+	const prefixes = ['055', '087', '091', '066', '090', '098', '086', '077', '056']; 
+	const randomPrefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+	let str = randomPrefix;
+	for (let i = 0; i < 7; i++) {
+		str += Math.floor(Math.random() * 10).toString();
+	}
 	return {
-		phone: faker.phone.number().replace(/ +/g, ''),
+		phone: str,
 		name: [n[2], n[0], n[1]].join(' '),
 		email: faker.internet.email(),
 	};
 }
+
+
 
 async function start() {
 	const browser = await puppeteer.launch({ headless: true, devtools: false });
@@ -185,11 +193,28 @@ async function start() {
 		});
 
 		// Đợi khoảng 0,5s
+
 		await new Promise((r) => setTimeout(r, 500));
 
 		await page.evaluate(() => {
-			window.vote(11, 'thpt_nam');
-			window.vote(54, 'thpt_nu');
+			function getRandomInt(min, max) {
+				return Math.floor(Math.random() * (max - min + 1)) + min;
+			}
+		
+			const randomNumber = getRandomInt(1, 10);
+
+			
+			if (randomNumber >= 1 && randomNumber <= 4) {
+				window.vote(11, 'thpt_nam');
+			} else if (randomNumber >= 5 && randomNumber <= 8) {
+				window.vote(54, 'thpt_nu');
+			} else if (randomNumber === 9) {
+				window.vote(25, 'thpt_nam');
+				window.vote(16, 'thpt_nam');
+			} else if (randomNumber === 10) {
+				window.vote(46, 'thpt_nu');
+				window.vote(40, 'thpt_nu');
+			}
 		});
 	}
 	task();
